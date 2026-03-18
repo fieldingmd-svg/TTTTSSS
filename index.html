@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Claude — Voice Assistant</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@200;400;600&display=swap');
+
+  :root {
+    --bg: #050810;
+    --panel: #0a0f1e;
+    --accent: #00d4ff;
+    --accent2: #7b2fff;
+    --glow: rgba(0,212,255,0.18);
+    --text: #c8e6f0;
+    --muted: #3a5060;
+    --danger: #ff3a6e;
+    --success: #00ffb3;
+    --face-size: min(72vw, 320px);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  body {
+    background: var(--bg);
+    font-family: 'Exo 2', sans-serif;
+    color: var(--text);
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Animated background grid */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    animation: gridShift 20s linear infinite;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  @keyframes gridShift {
+    0% { transform: translateY(0); }
+    100% { transform: translateY(40px); }
+  }
+
+  /* Config screen */
+  #config-screen {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 24px; gap: 16px;
+  }
+
+  #config-screen h1 {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.4rem;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    text-shadow: 0 0 20px var(--accent);
+    margin-bottom: 8px;
+  }
+
+  #config-screen p {
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-align: center;
+    max-width: 320px;
+    line-height: 1.6;
+  }
+
+  .config-group { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 6px; }
+  .config-group label { font-size: 0.72rem; color: var(--accent); letter-spacing: 0.1em; font-family: 'Share Tech Mono', monospace; }
+
+  .config-group input, .config-group select {
+    background: var(--panel);
+    border: 1px solid var(--muted);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.82rem;
+    padding: 10px 12px;
+    outline: none;
+    transition: border-color 0.2s;
+    width: 100%;
+  }
+  .config-group input:focus, .config-group select:focus { border-color: var(--accent); }
+  .config-group select option { background: var(--panel); }
+
+  #config-screen .hint {
+    font-size: 0.68rem;
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  #start-btn {
+    margin-top: 8px;
+    background: linear-gradient(135deg, var(--accent2), var(--accent));
+    border: none; border-radius: 8px;
+    color: #fff; font-family: 'Share Tech Mono', monospace;
+    font-size: 1rem; letter-spacing: 0.15em;
+    padding: 14px 40px; cursor: pointer;
+    box-shadow: 0 0 30px rgba(0,212,255,0.3);
+    transition: transform 0.1s, box-shadow 0.2s;
+    width: 100%; max-width: 340px;
+  }
+  #start-btn:active { transform: scale(0.97); }
+
+  /* Main app */
+  #app {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    width: 100%; height: 100dvh;
+    position: relative; z-index: 1;
+    padding: 20px 16px 16px;
+    gap: 16px;
+  }
+
+  .top-bar {
+    width: 100%; display: flex;
+    justify-content: space-between; align-items: center;
+  }
+
+  .top-bar .title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem; letter-spacing: 0.2em;
+    color: var(--accent);
+    text-shadow: 0 0 10px var(--accent);
+  }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+  .status-dot.active { background: var(--success); box-shadow: 0 0 10px var(--success); }
+  .status-dot.listening { background: var(--accent); box-shadow: 0 0 12px var(--accent); animation: pulse 1s ease-in-out infinite; }
+  .status-dot.speaking { background: var(--accent2); box-shadow: 0 0 12px var(--accent2); animation: pulse 0.6s ease-in-out infinite; }
+  .status-dot.error { background: var(--danger); box-shadow: 0 0 10px var(--danger); }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* Face container */
+  .face-wrap {
+    position: relative;
+    width: var(--face-size); height: var(--face-size);
+    flex-shrink: 0;
+  }
+
+  /* Orbit rings */
+  .ring {
+    position: absolute; border-radius: 50%;
+    border: 1px solid transparent;
+    top: 50%; left: 50%;
+    transform: translate(-50%,-50%);
+  }
+  .ring-1 {
+    width: calc(var(--face-size) + 30px); height: calc(var(--face-size) + 30px);
+    border-color: rgba(0,212,255,0.15);
+    animation: spin 12s linear infinite;
+  }
+  .ring-2 {
+    width: calc(var(--face-size) + 60px); height: calc(var(--face-size) + 60px);
+    border-color: rgba(123,47,255,0.1);
+    animation: spin 20s linear infinite reverse;
+  }
+  .ring-3 {
+    width: calc(var(--face-size) + 90px); height: calc(var(--face-size) + 90px);
+    border-color: rgba(0,212,255,0.06);
+    border-style: dashed;
+    animation: spin 35s linear infinite;
+  }
+
+  @keyframes spin { to { transform: translate(-50%,-50%) rotate(360deg); } }
+
+  /* Ring dots */
+  .ring-1::before, .ring-2::before {
+    content: '';
+    position: absolute; top: -3px; left: 50%;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    transform: translateX(-50%);
+  }
+  .ring-2::before { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+
+  /* SVG face */
+  #face-svg {
+    width: 100%; height: 100%;
+    filter: drop-shadow(0 0 24px rgba(0,212,255,0.4));
+    transition: filter 0.3s;
+  }
+
+  #face-svg.speaking { filter: drop-shadow(0 0 32px rgba(123,47,255,0.7)); animation: faceBob 0.4s ease-in-out infinite alternate; }
+  #face-svg.listening { filter: drop-shadow(0 0 28px rgba(0,212,255,0.8)); }
+
+  @keyframes faceBob { from{transform:translateY(0)} to{transform:translateY(-4px)} }
+
+  /* Blink animation */
+  @keyframes blink {
+    0%,92%,100% { transform: scaleY(1); }
+    95%,97% { transform: scaleY(0.05); }
+  }
+
+  .eyelid { transform-origin: center; animation: blink 4s ease-in-out infinite; }
+
+  /* Mouth */
+  #mouth-path { transition: d 0.15s ease; }
+
+  /* Transcript area */
+  .transcript-box {
+    width: 100%; max-width: 400px;
+    background: rgba(10,15,30,0.8);
+    border: 1px solid var(--muted);
+    border-radius: 10px;
+    padding: 12px 14px;
+    min-height: 70px; max-height: 130px;
+    overflow-y: auto;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    color: var(--text);
+    flex-shrink: 0;
+  }
+
+  .transcript-box .user-line { color: var(--accent); }
+  .transcript-box .ai-line { color: var(--text); }
+  .transcript-box .system-line { color: var(--muted); font-size: 0.7rem; }
+
+  /* Controls */
+  .controls {
+    display: flex; gap: 16px; align-items: center;
+    padding-bottom: 8px;
+  }
+
+  .btn-main {
+    width: 72px; height: 72px; border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: radial-gradient(circle at center, rgba(0,212,255,0.15), transparent);
+    color: var(--accent); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem;
+    box-shadow: 0 0 20px rgba(0,212,255,0.2), inset 0 0 20px rgba(0,212,255,0.05);
+    transition: all 0.2s;
+    position: relative; overflow: hidden;
+  }
+  .btn-main:active { transform: scale(0.94); }
+  .btn-main.recording {
+    border-color: var(--danger);
+    color: var(--danger);
+    box-shadow: 0 0 30px rgba(255,58,110,0.4), inset 0 0 20px rgba(255,58,110,0.1);
+    animation: recPulse 1s ease-in-out infinite;
+  }
+  @keyframes recPulse { 0%,100%{box-shadow:0 0 30px rgba(255,58,110,0.4)} 50%{box-shadow:0 0 50px rgba(255,58,110,0.7)} }
+
+  .btn-small {
+    width: 48px; height: 48px; border-radius: 50%;
+    border: 1px solid var(--muted);
+    background: var(--panel); color: var(--muted);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem;
+    transition: all 0.2s;
+  }
+  .btn-small:active { transform: scale(0.9); }
+  .btn-small.on { border-color: var(--accent2); color: var(--accent2); box-shadow: 0 0 12px rgba(123,47,255,0.3); }
+
+  .wake-indicator {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem; letter-spacing: 0.1em;
+    color: var(--muted); text-align: center;
+  }
+  .wake-indicator span { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- CONFIG SCREEN -->
+<div id="config-screen">
+  <h1>// CLAUDE INTERFACE</h1>
+  <p>Enter your API keys to activate. These stay on your device only.</p>
+
+  <div class="config-group">
+    <label>CLAUDE API KEY *</label>
+    <input type="password" id="claude-key" placeholder="sk-ant-..." autocomplete="off" />
+  </div>
+
+  <div class="config-group">
+    <label>VOICE ENGINE</label>
+    <select id="voice-engine">
+      <option value="browser">Browser TTS (free, no key needed)</option>
+      <option value="elevenlabs">ElevenLabs (more natural)</option>
+    </select>
+  </div>
+
+  <div id="el-group" class="config-group" style="display:none">
+    <label>ELEVENLABS API KEY</label>
+    <input type="password" id="el-key" placeholder="your ElevenLabs key" autocomplete="off" />
+    <span class="hint">Free tier at elevenlabs.io — 10k chars/month</span>
+  </div>
+
+  <div class="config-group">
+    <label>WAKE WORD</label>
+    <input type="text" id="wake-word" value="hey claude" placeholder="hey claude" autocomplete="off" />
+    <span class="hint">Say this phrase to activate hands-free</span>
+  </div>
+
+  <div class="config-group">
+    <label>PERSONALITY (system prompt)</label>
+    <input type="text" id="system-prompt" value="You are a helpful AI assistant with a warm, concise personality. Keep responses brief — under 3 sentences when possible — since you are speaking aloud." autocomplete="off" />
+  </div>
+
+  <button id="start-btn">INITIALIZE</button>
+  <p style="font-size:0.68rem">Keys are stored only in this browser session (sessionStorage).<br>Never sent anywhere except Anthropic/ElevenLabs APIs.</p>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <div class="top-bar">
+    <span class="title">// CLAUDE VOICE</span>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span id="status-label" style="font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:var(--muted)">STANDBY</span>
+      <div class="status-dot" id="status-dot"></div>
+    </div>
+  </div>
+
+  <div class="face-wrap">
+    <div class="ring ring-3"></div>
+    <div class="ring ring-2"></div>
+    <div class="ring ring-1"></div>
+
+    <svg id="face-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="faceGrad" cx="50%" cy="45%" r="55%">
+          <stop offset="0%" stop-color="#0d2035"/>
+          <stop offset="100%" stop-color="#050810"/>
+        </radialGradient>
+        <radialGradient id="eyeGrad" cx="50%" cy="30%" r="70%">
+          <stop offset="0%" stop-color="#00d4ff"/>
+          <stop offset="100%" stop-color="#0050ff"/>
+        </radialGradient>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="2.5" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <filter id="glow2">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <clipPath id="leftEyeClip"><ellipse cx="72" cy="88" rx="18" ry="12"/></clipPath>
+        <clipPath id="rightEyeClip"><ellipse cx="128" cy="88" rx="18" ry="12"/></clipPath>
+      </defs>
+
+      <!-- Head -->
+      <ellipse cx="100" cy="105" rx="72" ry="82" fill="url(#faceGrad)" stroke="#00d4ff" stroke-width="1.2" opacity="0.9"/>
+
+      <!-- Hex pattern subtle overlay -->
+      <ellipse cx="100" cy="105" rx="72" ry="82" fill="none" stroke="#00d4ff" stroke-width="0.3" opacity="0.2" stroke-dasharray="4 8"/>
+
+      <!-- Brow lines -->
+      <line x1="54" y1="72" x2="90" y2="76" stroke="#00d4ff" stroke-width="1.5" stroke-linecap="round" opacity="0.6" filter="url(#glow)"/>
+      <line x1="146" y1="72" x2="110" y2="76" stroke="#00d4ff" stroke-width="1.5" stroke-linecap="round" opacity="0.6" filter="url(#glow)"/>
+
+      <!-- Left eye -->
+      <ellipse cx="72" cy="88" rx="18" ry="12" fill="#03111f" stroke="#00d4ff" stroke-width="1.2" filter="url(#glow)"/>
+      <ellipse cx="72" cy="88" rx="10" ry="10" fill="url(#eyeGrad)" clip-path="url(#leftEyeClip)"/>
+      <ellipse cx="72" cy="88" rx="5" ry="5" fill="#001833"/>
+      <ellipse cx="69" cy="85" rx="2" ry="2" fill="white" opacity="0.7"/>
+      <!-- Eyelid left -->
+      <ellipse class="eyelid" cx="72" cy="83" rx="18" ry="12" fill="#050810" clip-path="url(#leftEyeClip)" style="transform-box:fill-box"/>
+
+      <!-- Right eye -->
+      <ellipse cx="128" cy="88" rx="18" ry="12" fill="#03111f" stroke="#00d4ff" stroke-width="1.2" filter="url(#glow)"/>
+      <ellipse cx="128" cy="88" rx="10" ry="10" fill="url(#eyeGrad)" clip-path="url(#rightEyeClip)"/>
+      <ellipse cx="128" cy="88" rx="5" ry="5" fill="#001833"/>
+      <ellipse cx="125" cy="85" rx="2" ry="2" fill="white" opacity="0.7"/>
+      <!-- Eyelid right -->
+      <ellipse class="eyelid" cx="128" cy="83" rx="18" ry="12" fill="#050810" clip-path="url(#rightEyeClip)" style="transform-box:fill-box;animation-delay:0.05s"/>
+
+      <!-- Nose bridge -->
+      <path d="M100 98 Q96 108 98 115 Q100 118 102 115 Q104 108 100 98" fill="none" stroke="#00d4ff" stroke-width="0.8" opacity="0.4"/>
+
+      <!-- Mouth -->
+      <path id="mouth-path" d="M80 138 Q100 145 120 138" fill="none" stroke="#00d4ff" stroke-width="2" stroke-linecap="round" filter="url(#glow)"/>
+
+      <!-- Cheek accents -->
+      <ellipse cx="55" cy="115" rx="10" ry="5" fill="#00d4ff" opacity="0.06"/>
+      <ellipse cx="145" cy="115" rx="10" ry="5" fill="#00d4ff" opacity="0.06"/>
+
+      <!-- Tech lines on forehead -->
+      <line x1="85" y1="40" x2="115" y2="40" stroke="#00d4ff" stroke-width="0.8" opacity="0.3"/>
+      <line x1="90" y1="46" x2="110" y2="46" stroke="#00d4ff" stroke-width="0.5" opacity="0.2"/>
+      <circle cx="100" cy="34" r="4" fill="none" stroke="#00d4ff" stroke-width="1" opacity="0.4" filter="url(#glow)"/>
+      <circle cx="100" cy="34" r="2" fill="#00d4ff" opacity="0.5"/>
+
+      <!-- Chin tech detail -->
+      <line x1="88" y1="175" x2="112" y2="175" stroke="#00d4ff" stroke-width="0.8" opacity="0.25"/>
+    </svg>
+  </div>
+
+  <div class="transcript-box" id="transcript">
+    <div class="system-line">// system online — tap mic or say wake word</div>
+  </div>
+
+  <div class="controls">
+    <button class="btn-small" id="btn-wake" title="Toggle wake word">👂</button>
+    <button class="btn-main" id="btn-mic" title="Hold to speak">🎙️</button>
+    <button class="btn-small" id="btn-mute" title="Mute voice output">🔊</button>
+  </div>
+
+  <div class="wake-indicator" id="wake-indicator">
+    wake word: <span id="wake-display">hey claude</span> &nbsp;·&nbsp; <span id="wake-status">OFF</span>
+  </div>
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────
+let claudeKey = '', elKey = '', voiceEngine = 'browser', systemPrompt = '', wakeWord = 'hey claude';
+let conversationHistory = [];
+let isRecording = false, isSpeaking = false, wakeActive = false, muted = false;
+let recognition = null, wakeRecognition = null;
+let currentAudio = null;
+let mouthAnimFrame = null;
+
+// ─── Elements ─────────────────────────────────────────────
+const configScreen = document.getElementById('config-screen');
+const app = document.getElementById('app');
+const faceSvg = document.getElementById('face-svg');
+const mouthPath = document.getElementById('mouth-path');
+const transcript = document.getElementById('transcript');
+const statusDot = document.getElementById('status-dot');
+const statusLabel = document.getElementById('status-label');
+const btnMic = document.getElementById('btn-mic');
+const btnWake = document.getElementById('btn-wake');
+const btnMute = document.getElementById('btn-mute');
+const wakeDisplay = document.getElementById('wake-display');
+const wakeStatus = document.getElementById('wake-status');
+const voiceEngineSelect = document.getElementById('voice-engine');
+
+// ─── Config screen ────────────────────────────────────────
+voiceEngineSelect.addEventListener('change', () => {
+  document.getElementById('el-group').style.display = voiceEngineSelect.value === 'elevenlabs' ? 'flex' : 'none';
+});
+
+document.getElementById('start-btn').addEventListener('click', () => {
+  claudeKey = document.getElementById('claude-key').value.trim();
+  if (!claudeKey) { alert('Claude API key is required.'); return; }
+  elKey = document.getElementById('el-key').value.trim();
+  voiceEngine = voiceEngineSelect.value;
+  systemPrompt = document.getElementById('system-prompt').value.trim();
+  wakeWord = document.getElementById('wake-word').value.trim().toLowerCase() || 'hey claude';
+  wakeDisplay.textContent = wakeWord;
+
+  // Store in session only
+  sessionStorage.setItem('ck', claudeKey);
+  if (elKey) sessionStorage.setItem('ek', elKey);
+
+  configScreen.style.display = 'none';
+  app.style.display = 'flex';
+  setStatus('active', 'READY');
+  initSpeechRecognition();
+});
+
+// ─── Status ───────────────────────────────────────────────
+function setStatus(state, label) {
+  statusDot.className = 'status-dot ' + state;
+  statusLabel.textContent = label;
+}
+
+// ─── Transcript ───────────────────────────────────────────
+function addLine(text, type) {
+  const div = document.createElement('div');
+  div.className = type + '-line';
+  div.textContent = (type === 'user' ? '> ' : type === 'ai' ? '◈ ' : '// ') + text;
+  transcript.appendChild(div);
+  transcript.scrollTop = transcript.scrollHeight;
+}
+
+// ─── Mouth animation ──────────────────────────────────────
+const mouthShapes = {
+  idle:    'M80 138 Q100 145 120 138',
+  talk1:   'M82 136 Q100 150 118 136',
+  talk2:   'M84 134 Q100 152 116 134',
+  talk3:   'M82 138 Q100 148 118 138',
+  listen:  'M83 142 Q100 140 117 142',
+  smile:   'M78 137 Q100 150 122 137',
+};
+
+function setMouth(shape) {
+  mouthPath.setAttribute('d', mouthShapes[shape] || mouthShapes.idle);
+}
+
+let talkIdx = 0;
+const talkCycle = ['talk1','talk2','talk3','talk2','talk1','idle'];
+function animateTalking() {
+  if (!isSpeaking) { setMouth('idle'); return; }
+  setMouth(talkCycle[talkIdx % talkCycle.length]);
+  talkIdx++;
+  mouthAnimFrame = setTimeout(animateTalking, 120);
+}
+
+// ─── Speech Recognition ───────────────────────────────────
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function initSpeechRecognition() {
+  if (!SpeechRecognition) {
+    addLine('Speech recognition not supported in this browser. Try Chrome/Vanadium.', 'system');
+    return;
+  }
+}
+
+function startListening(onResult, onEnd) {
+  if (!SpeechRecognition) return;
+  const rec = new SpeechRecognition();
+  rec.lang = 'en-US';
+  rec.interimResults = false;
+  rec.maxAlternatives = 1;
+  rec.onresult = (e) => { onResult(e.results[0][0].transcript); };
+  rec.onend = onEnd;
+  rec.onerror = (e) => { console.warn('SR error:', e.error); onEnd(); };
+  rec.start();
+  return rec;
+}
+
+// ─── Wake word ────────────────────────────────────────────
+function startWakeListening() {
+  if (!SpeechRecognition || !wakeActive) return;
+  wakeRecognition = new SpeechRecognition();
+  wakeRecognition.lang = 'en-US';
+  wakeRecognition.interimResults = true;
+  wakeRecognition.continuous = false;
+  wakeRecognition.onresult = (e) => {
+    const said = Array.from(e.results).map(r => r[0].transcript).join(' ').toLowerCase();
+    if (said.includes(wakeWord)) {
+      wakeRecognition.stop();
+      setTimeout(() => triggerMainListen(), 300);
+    }
+  };
+  wakeRecognition.onend = () => { if (wakeActive && !isRecording && !isSpeaking) setTimeout(startWakeListening, 500); };
+  wakeRecognition.onerror = () => { if (wakeActive) setTimeout(startWakeListening, 1000); };
+  wakeRecognition.start();
+}
+
+btnWake.addEventListener('click', () => {
+  wakeActive = !wakeActive;
+  btnWake.classList.toggle('on', wakeActive);
+  wakeStatus.textContent = wakeActive ? 'ON' : 'OFF';
+  wakeStatus.style.color = wakeActive ? 'var(--accent)' : 'var(--muted)';
+  if (wakeActive) { addLine('Wake word listening active', 'system'); startWakeListening(); }
+  else { if (wakeRecognition) wakeRecognition.stop(); addLine('Wake word disabled', 'system'); }
+});
+
+// ─── Mic button ───────────────────────────────────────────
+btnMic.addEventListener('click', () => {
+  if (isSpeaking) { stopSpeaking(); return; }
+  if (isRecording) return;
+  triggerMainListen();
+});
+
+function triggerMainListen() {
+  if (isRecording || isSpeaking) return;
+  isRecording = true;
+  btnMic.classList.add('recording');
+  btnMic.textContent = '⏹';
+  setStatus('listening', 'LISTENING');
+  setMouth('listen');
+  faceSvg.classList.add('listening');
+  addLine('Listening…', 'system');
+
+  startListening(
+    (text) => {
+      isRecording = false;
+      btnMic.classList.remove('recording');
+      btnMic.textContent = '🎙️';
+      faceSvg.classList.remove('listening');
+      if (text) { addLine(text, 'user'); sendToClaude(text); }
+      else { setStatus('active', 'READY'); setMouth('idle'); }
+    },
+    () => {
+      if (isRecording) {
+        isRecording = false;
+        btnMic.classList.remove('recording');
+        btnMic.textContent = '🎙️';
+        faceSvg.classList.remove('listening');
+        setStatus('active', 'READY');
+        setMouth('idle');
+      }
+    }
+  );
+}
+
+// ─── Mute ─────────────────────────────────────────────────
+btnMute.addEventListener('click', () => {
+  muted = !muted;
+  btnMute.textContent = muted ? '🔇' : '🔊';
+  btnMute.classList.toggle('on', muted);
+  if (muted && isSpeaking) stopSpeaking();
+});
+
+// ─── Claude API ───────────────────────────────────────────
+async function sendToClaude(userText) {
+  setStatus('active', 'THINKING');
+  conversationHistory.push({ role: 'user', content: userText });
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 300,
+        system: systemPrompt,
+        messages: conversationHistory
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error?.message || resp.status);
+    }
+
+    const data = await resp.json();
+    const reply = data.content[0].text;
+    conversationHistory.push({ role: 'assistant', content: reply });
+    addLine(reply, 'ai');
+    if (!muted) speak(reply);
+    else { setStatus('active', 'READY'); if (wakeActive) setTimeout(startWakeListening, 400); }
+
+  } catch (e) {
+    addLine('Error: ' + e.message, 'system');
+    setStatus('error', 'ERROR');
+    setTimeout(() => setStatus('active', 'READY'), 3000);
+  }
+}
+
+// ─── Voice output ─────────────────────────────────────────
+function stopSpeaking() {
+  isSpeaking = false;
+  faceSvg.classList.remove('speaking');
+  clearTimeout(mouthAnimFrame);
+  setMouth('idle');
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  window.speechSynthesis?.cancel();
+  setStatus('active', 'READY');
+  if (wakeActive) setTimeout(startWakeListening, 600);
+}
+
+function onSpeakEnd() {
+  isSpeaking = false;
+  faceSvg.classList.remove('speaking');
+  clearTimeout(mouthAnimFrame);
+  setMouth('smile');
+  setTimeout(() => setMouth('idle'), 800);
+  setStatus('active', 'READY');
+  if (wakeActive) setTimeout(startWakeListening, 600);
+}
+
+async function speak(text) {
+  isSpeaking = true;
+  setStatus('speaking', 'SPEAKING');
+  faceSvg.classList.add('speaking');
+  talkIdx = 0;
+  animateTalking();
+
+  if (voiceEngine === 'elevenlabs' && elKey) {
+    try {
+      const resp = await fetch('https://api.elevenlabs.io/v1/text-to-speech/EXAVITQu4vr4xnSDxMaL', {
+        method: 'POST',
+        headers: { 'xi-api-key': elKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, model_id: 'eleven_turbo_v2', voice_settings: { stability: 0.5, similarity_boost: 0.8 } })
+      });
+      if (!resp.ok) throw new Error('ElevenLabs error ' + resp.status);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      currentAudio = new Audio(url);
+      currentAudio.onended = onSpeakEnd;
+      currentAudio.onerror = () => { URL.revokeObjectURL(url); onSpeakEnd(); };
+      currentAudio.play();
+      return;
+    } catch (e) {
+      console.warn('ElevenLabs failed, falling back to browser TTS:', e);
+    }
+  }
+
+  // Browser TTS fallback
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.rate = 1.05; utter.pitch = 0.95; utter.volume = 1;
+  // Try to pick a decent voice
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = voices.find(v => v.name.includes('Google') || v.name.includes('Samantha') || v.name.includes('Daniel'));
+  if (preferred) utter.voice = preferred;
+  utter.onend = onSpeakEnd;
+  utter.onerror = onSpeakEnd;
+  window.speechSynthesis.speak(utter);
+}
+
+// Load voices async on some browsers
+window.speechSynthesis?.addEventListener('voiceschanged', () => {});
+</script>
+</body>
+</html>
